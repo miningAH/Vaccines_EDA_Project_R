@@ -1,0 +1,754 @@
+---
+title: "Vaccines EDA Project"
+author: "miningAH"
+date: "2023-12-07"
+output: html_document
+---
+
+<style type="text/css">
+
+/* setting the stylistic criteria for the document */ 
+
+body{
+font-size: 12pt;
+font-family: Arial, sans-serif;
+letter-spacing: 1px;
+}
+
+</style>
+
+\newpage
+
+```{r}
+#clearing the environment
+rm(list = ls())
+```
+
+```{r setup, message=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+#importing libraries
+library(datasets)
+library(DataExplorer)
+library(readxl)
+library(tidyverse)
+library(stringr)
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(koRpus)
+library(lubridate)
+library(glue)
+library(reshape2)
+library(data.table)
+library(moments)
+suppressWarnings(library(moments))
+```
+
+```{r}
+# reading the excel file and storing it in a data frame called ‘vaccdf’. 
+# Note: The file below needs to be replaced with the users corresponding local file.
+vaccdf <-  read_xlsx("UK_VaccinationsData.xlsx")
+```
+
+```{r}
+# Counting the number of words in the file and printing it to the document.
+#nwords = wordcountaddin::word_count()
+#cat("There are", nwords, "words in this markdown.")
+```
+
+\newpage
+
+## Introduction
+
+This report will explore information about the numbers of people who took a first, second, and third dose of the COVID-19 vaccination in different regions of the UK. The aim of this report is to gain useful insights about the administration of vaccine doses during this time period. 
+
+\newpage
+
+## Initial exploration
+
+```{r}
+# viewing the top 3 records in the data set
+head(vaccdf,3)
+# viewing the bottom 3 records in the data set
+tail(vaccdf,3)
+```
+
+```{r}
+# viewing a diagnostic summary of the data
+str(vaccdf)
+```
+
+Findings:
+
+- The data set has 10 attributes and 904 records.
+- viewing the final 3 records we can see a missing value. Data pre-processing will need to be carried out to ensure that such values don't have an impact on the analysis.
+- The data seems to be consistent in terms of format
+- All attributes are appropriately named so no changes are required.
+
+\newpage
+
+## (1) Main trends
+
+```{r}
+# viewing a summary of the data - using the summary function.
+summary(vaccdf)
+```
+
+```{r}
+rDescStats<- function(df, rStat){
+  #' Calculating descriptive statistics not covered by the base R summary function
+  #' @param df - data frame
+  #' @param rStat - remaining statistics
+  #' @return the desired statistic specified as an argument
+  
+  # Switch logic:
+  # - the relevant codes block will run based on the user provided rStat value.
+  switch(rStat, 
+         std={
+           # If the user provided parameter value is 'std' this code block will run.
+           # If run, then the 'std' for the data set will be calculated and printed
+           std<-sapply(df, sd, na.rm=TRUE)
+           print(std)
+         },
+         range={
+           # If the user provided parameter value is 'range' this code block will run.
+           # If run, then the range for the data set will be calculated and printed
+           range<-sapply(df, function(df) max(df, na.rm=TRUE)-min(df, na.rm=TRUE))
+           print(range)    
+         },
+         mode={
+           # If the user provided parameter value is 'mode' this code block will run.
+           # If run, then the mode for the data set will be calculated and printed
+           mode<- sapply(df, function(df){which.max(tabulate(df))})
+           print(mode)    
+         },
+         {
+           # The following message is printed if none of the above code blocks run
+           print('specify the statistic you want to know: mode, range or std')
+         }
+  )
+}
+```
+
+```{r}
+# calling the rDescStats function 
+# - to get descriptive statistics not covered by the summary function.
+# the function takes two arguments:
+# 1) a numeric dataset 
+# 2) the stat you want to calculate (either mode, range, or standard deviation)
+# Instead of creating a new numeric subset of the data 
+# an expression which will return the desired rows from the data set has been used. 
+#In this way memory is not being used to store a variable which may only be used once).
+rDescStats(vaccdf %>% select(FirstDose, SecondDose, ThirdDose), 'std')
+```
+
+Findings:
+
+- The number of second dose vaccines is on average higher than those coming for a second or third dose. 
+- The range of people coming for a third dose is greater than those coming for a first or second. 
+- Taking the range into account with the standard deviation, we can conclude that there is a high amount of fluctuation in the number of people coming for a third dose. 
+- The range and standard deviation for second doses shows the least fluctuation. Hence the amount of second doses administered is easier to predict.  
+- There is evidence of some rows having missing data, but the number seems to be low.
+- Looking at the most common values for the first, second and third doses administered in a day we can see that there seems to be many days with high third doses being administered in comparison to the other two.
+
+\newpage
+
+## (2) Missing data.
+
+```{r}
+# using the plot_intro function:
+# - check the location and percentage of the missing values in the data. 
+plot_intro(vaccdf)
+```
+We can see that a few missing values exist within the rows of the data set.
+
+```{r}
+# using the plot_missing function - see where missing values are in within data columns.
+plot_missing(vaccdf)
+```
+Most of the missing data exists within the three dosage attributes. Perhaps this is due to no values being recorded on those days.
+
+```{r}
+# calculating the number of rows with missing values in the data.
+vaccdf[!complete.cases(vaccdf), ]
+```
+There are only 14 rows which contain missing data.
+
+```{r}
+# Checking reasonableness of replacing the Dosage attributes that have NA values with 0.
+# printing the rows wherein the firstdose, secondose, or thirddose columns contain 0.
+print(filter(vaccdf,FirstDose==0 | SecondDose==0 | ThirdDose==0))
+```
+
+Since it is reasonable to replace the Dosage attributes that have NA values with a 0, this will be done.
+
+```{r}
+#imputing the dosage attributes/columns containing na with zeros.
+vaccdf1 <- vaccdf %>% 
+  mutate_at(c('FirstDose','SecondDose', 'ThirdDose'), ~replace_na(.,0))
+```
+
+```{r}
+# re-calculating the number of rows with missing values in the data.
+# storing these rows in a variable named naRows.
+naRows <- vaccdf1[!complete.cases(vaccdf1), ]
+naRows
+```
+
+Five remaining rows have missing data. We will remove them, as doing so will not have a significant impact on the analysis, whilst leaving such rows in the data set may have an impact. 
+
+```{r}
+# using the anti_join function to remove the 5 remaining rows containing na values.
+vaccdf1 <- anti_join(vaccdf,naRows)
+```
+
+```{r}
+# checking that only 5 records were removed.
+count(vaccdf1)
+```
+
+\newpage
+
+## (3) Visualisations
+
+```{r}
+# New attribute to the data set:
+# - combines between the year and month columns. 
+# Such an attribute will help to make more useful visualisations.
+
+#first a new 'date' column is made using the year and month values of the row 
+# and a default day (September 1st). 
+#Another column 'month_year' is then made based on this 'date' column. 
+#The difference between the two being that the default day has been removed.
+vaccdf1 <- vaccdf1 %>%
+  mutate(date = as.Date(
+    paste(vaccdf1$year, vaccdf1$month, "01", sep = "-"), format = "%Y-%m-%d"),
+         month_year = format(date, "%Y-%m"))
+
+#removing the 'date' column
+vaccdf1 <- vaccdf1 %>%
+  select(-date)
+```
+
+### (3.A) Distribution of individual continuous variables
+
+```{r}
+cVarDistHist <- function(xVar, xlabel, ylabel, titleText, captionText){
+  #' Histogram showing the distribution of a continuous variable
+  #' @param xVar - the x axis variable of the histogram
+  #' @param xlabel - the x-axis label
+  #' @param ylabel - the y-axis label
+  #' @param titleText - the title of the histogram
+  #' @param captionText - the caption for the histogram
+  #' @return a histogram plot - built based on the parameter values specified
+  
+  #building the histogram - leaving the x variable to be dynamically specified
+  #creating a multi-variate plot 
+  # - using the colour of the plot to show the month_year variable. 
+  ggplot(vaccdf1, aes(x=xVar, color = month_year)) +
+    geom_histogram() +  
+    #limiting the x-axis and y-axis scale so that the plot is easier to visualise
+    xlim(0, 50000) +
+    ylim(0, 200) +
+    #setting the number of bins for the histogram
+    geom_histogram(bins = 30) +
+    #setting the design theme of the histogram to minimal
+    theme_minimal() +
+    theme(axis.text=element_text(size=10),
+          axis.title=element_text(size=10,face="bold"))+
+    #specifying the labels to be the user provided values
+    labs(
+      x =xlabel,
+      y= ylabel,
+      title = titleText,
+      caption = captionText
+    )
+}
+```
+
+A histogram distribution of First Doses
+
+```{r warnings=FALSE}
+#calling the cVarDistHist function and specifying the argument values.
+#passing the continuous variable FirstDose to be the x value of the histogram
+cVarDistHist(vaccdf1$FirstDose,
+             "Number of people on that day", 
+             "Frequency of days", 
+             "Most days had relatively low numbers of people coming for a First Dose",
+             "Data from the UK government’s Coronavirus Vaccinations page.")
+```
+
+Findings:
+
+- The distribution is extremely right skewed 
+- Around 250 days (out of 899) had under 5000 doses administered.
+- Most of the high frequency days occurred in 2021.
+
+A histogram distribution of Second Doses:
+```{r warnings=FALSE}
+#calling the cVarDistHist function and specifying the argument values.
+#passing the continuous variable SecondDose to be the x value of the histogram
+cVarDistHist(vaccdf1$SecondDose,
+             "Number of people on that day", 
+             "Frequency of days", 
+             "Most days had relatively low numbers of people coming for a Second Dose",
+             "Data from the UK government’s Coronavirus Vaccinations page.")
+```
+
+Findings:
+
+- The distribution is also extremely right skewed 
+- It shows a similar distribution to first doses. 
+- Around 250 days (out of 899) had under 5000 doses administered.
+- Again, most of the high frequency days occurred in 2021.
+
+A histogram distribution of Third Doses:
+```{r warnings=FALSE}
+#calling the cVarDistHist function and specifying the argument values.
+#passing the continuous variable ThirdDose to be the x value of the histogram
+cVarDistHist(vaccdf1$ThirdDose,
+             "Number of people on that day", 
+             "Frequency of days", 
+             "Most days had relatively low numbers of people coming for a Third Dose",
+             "Data from the UK government’s Coronavirus Vaccinations page.")
+```
+
+Findings:
+
+- The distribution is right skewed but less so than the other two doses. 
+- Around 325 days (out of 899 days) had under 7500 doses administered.
+- Most of the high frequency days occurred in 2022.
+
+### (3.B) Relationship of a pair of continuous variables.
+```{r warnings=FALSE}
+cVarsRelScatter <- function(xVar, yVar, xlabel, ylabel, titleText, captionText){
+  #' Scatter plot showing the relationship between a of a pair of continuous variables
+  #' @param xVar - the x axis variable of the scatter plot
+  #' @param yVar - the y axis variable of the scatter plot
+  #' @param xlabel - the x-axis label
+  #' @param ylabel - the y-axis label
+  #' @param titleText - the title of the scatter plot
+  #' @param captionText - the caption for the scatter plot
+  #' @return a scatter plot - built based on the parameter values specified
+  
+  #building the scatter plot - leaving the x & y variables to be dynamically specified
+  #creating a tri-variate plot 
+  # - using the colour of the plot to show the month_year variable 
+  ggplot(vaccdf1, aes(x=xVar, y=yVar, color = month_year)) +
+    geom_point() +  
+    #limiting the x-axis scale so that the plot is easier to visualise
+    xlim(0, 45000) +
+    #setting the design theme of the scatter plot to minimal
+    theme_minimal() +
+    theme(axis.text=element_text(size=10),
+          axis.title=element_text(size=10,face="bold"))+
+    #specifying the labels to be the user provided values
+    labs(
+      x =xlabel,
+      y= ylabel,
+      title = titleText,
+      caption = captionText
+    )
+}
+```
+
+```{r warnings=FALSE}
+#calling the cVarsRelScatter function and specifying the argument values.
+#passing the continuous variable FirstDose to be the x value of the Scatter plot
+#passing the continuous variable SecondDose to be the y value of the Scatter plot
+cVarsRelScatter(vaccdf1$FirstDose,
+                vaccdf1$SecondDose,
+                "First Dose", 
+                "Second Dose", 
+                "Number of First Dose vs Second Dose on the same day",
+                "Data from the UK government’s Coronavirus Vaccinations page.")
+```
+
+Findings:
+
+- The relationship is linear and positive.
+- In the first three months of 2022 it seems that more second doses were administered in comparison to first doses. However since then the trend seems to be switching.
+- Before the winter of 2021 a lot of first doses were being administered.
+- Winter 2021/2022 saw a huge increase in second doses.
+
+```{r warnings=FALSE}
+#calling the cVarsRelScatter function and specifying the argument values.
+#passing the continuous variable FirstDose to be the x value of the Scatter plot
+#passing the continuous variable ThirdDose to be the y value of the Scatter plot
+cVarsRelScatter(vaccdf1$FirstDose,
+                vaccdf1$ThirdDose,
+                "First Dose", 
+                "Third Dose", 
+                "Number of First Dose vs Third Dose on the same day",
+                "Data from the UK government’s Coronavirus Vaccinations page.")
+```
+
+Findings:
+
+- The relationship is not clear.
+- Very little third doses have been administered in 2022.
+- Most third doses were taken in, and just before, December 2021.
+
+### (3.C) association between a categorical and continuous variable.
+
+```{r}
+mixVarsAssocBar <- function(xVar,yVar, xlabel, ylabel, titleText, captionText){
+  #' Bar plot showing the association between a categorical and continuous variable
+  #' @param xVar - the x axis variable of the bar plot
+  #' @param yVar - the y axis variable of the bar plot
+  #' @param xlabel - the x-axis label
+  #' @param ylabel - the y-axis label
+  #' @param titleText - the title of the bar plot
+  #' @param captionText - the caption for the bar plot
+  #' @return a Bar plot - built based on the parameter values specified
+  
+  #building the bar plot - leaving the x & y variables to be dynamically specified
+  ggplot(vaccdf1, aes(x=xVar, y=yVar)) +
+    # specifying stat as identity as y value is to be provided by the user
+    geom_bar(stat="identity") + 
+    #setting the design theme of the scatter plot to minimal
+    theme_minimal() +   
+    theme(axis.text=element_text(size=10),
+          axis.title=element_text(size=10,face="bold"))+
+    #specifying the labels to be the user provided values
+    labs(
+      x =xlabel, 
+      y= ylabel, 
+      title = titleText,
+      caption = captionText
+    )
+}
+```
+```{r warnings=FALSE}
+#calling the mixVarsAssocBar function and specifying the argument values.
+#passing the categorical variable month_year to be the x value of the bar plot
+#passing the continuous variable FirstDose to be the y value of the bar plot
+mixVarsAssocBar(vaccdf1$month_year,
+                vaccdf1$FirstDose, 
+                "month & year", 
+                "First Dose" ,
+                "First Dose Time-Frequency Distribution",
+                "Data from the UK government’s Coronavirus Vaccinations page.")
+```
+
+Findings:
+
+- A clear peak period exists between October and December 2021. 
+- A downward trend followed this up until April 2022 where a notable increase was seen.
+
+```{r warnings=FALSE}
+#calling the mixVarsAssocBar function and specifying the argument values.
+#passing the categorical variable month_year to be the x value of the bar plot
+#passing the continuous variable SecondDose to be the y value of the bar plot
+mixVarsAssocBar(vaccdf1$month_year,
+                vaccdf1$SecondDose, 
+                "month & year", 
+                "Second Dose" ,
+                "Second Dose Time-Frequency Distribution",
+                "Data from the UK government’s Coronavirus Vaccinations page.")
+```
+
+Findings:
+
+- The distribution shows a more normal shape, with a slight right skew. 
+- Second dose vaccines shot up in October 2021 and has been deceasing after its peak in December 2021. 
+
+```{r warnings=FALSE}
+#calling the mixVarsAssocBar function and specifying the argument values.
+#passing the categorical variable month_year to be the x value of the bar plot
+#passing the continuous variable ThirdDose to be the y value of the bar plot
+mixVarsAssocBar(vaccdf1$month_year,
+                vaccdf1$ThirdDose,
+                "month & year", 
+                "Third Dose" ,
+                "Third Dose Time-Frequency Distribution",
+                "Data from the UK government’s Coronavirus Vaccinations page.")
+```
+
+Findings:
+
+- A clear peak period can be seen in December 2021, which dropped substantially in the following months.
+- The distribution has a strong right skew. 
+
+### (3.D) relationship between two variables
+
+```{r warnings=FALSE}
+# creating a data subset based on the area name criterion below.
+#The data set should only contain rows related to the devolved nations of the UK.
+devolvedDf <- subset(vaccdf1, 
+                     areaName == 'Northern Ireland' | 
+                       areaName == 'Scotland' | 
+                       areaName == 'Wales')
+
+#plotting the data subset as a Boxplot
+# using the colour aspect of the box plot to semantically represent the area 
+ggplot(devolvedDf, aes(x=Quarter,y=FirstDose, color=areaName)) +
+  geom_boxplot(outlier.shape = NA)+
+  ylim(0, 1500) +
+  facet_wrap(year~areaName) +
+  theme(axis.text=element_text(size=10),
+        axis.title=element_text(size=10,face="bold"))+
+  scale_color_manual(values=c("purple","blue","red")
+  )
+```
+
+Findings:
+
+- Scotland has administered more first doses of the vaccine in total and on average. 
+- Northern Ireland has had fewer first doses administered per day than any other devolved nation in 2022 
+- The quartiles for Wales are of a similar size indicated a fairly consistent pattern of first doses across the different time periods.
+
+\newpage
+
+## (4) Unique values of categorical variables.
+
+```{r warnings=FALSE}
+# WorkingDay only has two possible values (yes and no)
+# hence it would be better as a factor as opposed to a Character.
+vaccdf1$WorkingDay = as.factor(vaccdf1$WorkingDay) 
+#checking the class has changed to factor
+class(vaccdf1$WorkingDay)
+
+#creating a bar plot to show the count of working days versus non-working days
+ggplot(vaccdf1, aes(x=WorkingDay)) +
+  xlab('Working Day')+
+  ylab('Count') +
+  theme(axis.text=element_text(size=10),
+        axis.title=element_text(size=10,face="bold"))+
+  geom_bar()
+```
+
+Findings:
+
+- The UK public prefer to get vaccinated on a weekday.
+- To check if these results are dependent on the area of the UK a chi-squared test will be used.
+
+\newpage
+
+## (5) Contingency and statistical test of the independence.
+
+Chi squared:
+HO: no dependence between the different areas of the UK and whether they get their vaccines on a working day
+H1: there is a dependence between the different areas of the UK and whether they get their vaccines on a working day
+
+```{r}
+#creating a table based on the area name and working day attributes
+dmTable<- table(vaccdf1$areaName, vaccdf1$WorkingDay)
+dmTable
+#running a chi-squared test on this table
+chisq.test(dmTable)
+```
+
+The p-value from the chi-squared test is 0.9994. This is a lot higher than the 0.05 significance level. Hence, we cannot reject the null hypothesis. We must conclude that there is no dependence between the area and the day they choose to get a vaccine (weekend/weekday).
+
+\newpage
+
+## (6) Descriptive statistics on data subsets.
+
+Exploring whether the Christmas period may have impacted the number of people getting a vaccine.
+
+```{r}
+#creating a data subset based on: 
+# - the area being England, 
+# - the month being November 
+# - and the day being a weekday.
+midoData <- filter(vaccdf1, areaName == "England" & WorkingDay=="Yes" & month==12)
+#viewing a summary of the data subset
+summary(midoData)
+```
+
+```{r}
+# calling the rDescStats function 
+# - get descriptive statistics not covered by the summary function
+# the function takes two arguments:
+# 1) a numeric dataset 
+# 2) the stat you want to calculate (either mode, range, or standard deviation)
+# Instead of creating a new numeric subset of the data 
+# an expression which will return the desired rows from the data set has been used. 
+# In this way memory is not being used to store a variable which may only be used once).
+rDescStats(vaccdf1 %>% select(FirstDose, SecondDose, ThirdDose), 'std')
+```
+
+Findings:
+
+- The minimum value for all 3 doses is quite high so people are not staying away from getting vaccinated in December. 
+- The third dose has the highest mean followed by the second and then the first.
+- A look at the standard deviation reveals that a substantial amount of deviation exists for the third dose. This shows that the day-to-day number of people getting there third dose fluctuates dramatically.
+
+\newpage
+
+## (7) statistical test of the significance for the difference in means.
+
+Testing whether there is a difference in the number of people getting a vaccine in November in comparison to December. This will help us to learn whether vaccine numbers increased before the start of the winter months.
+
+HO = mean difference is equal to 0. There is not much of a difference between summer and winter months
+HO =  mean difference is not equal to 0. There is a difference between summer and winter months
+
+```{r echo = FALSE}
+#creating a subset of the data set based on the area being england and the months being November or December
+monthSW <- filter(vaccdf1, areaName =="England" & (month== 12 | month==11))
+
+#creating a new column on the end of the data subset. Each row of the column will take the values Yes or No based on whether the value of the month column is 12 (yes) or not (no)
+monthSW1 <- monthSW %>%
+  mutate(DecemberCheck = if_else(month == 12, "Yes", "No"))
+```
+
+```{r echo = FALSE}
+#seperating the two data sets based on the value of the variable DecemberCheck (Yes or No)
+isDecember = monthSW1[monthSW1$DecemberCheck=="Yes",]$FirstDose
+notDecember = monthSW1[monthSW1$DecemberCheck=="No",]$FirstDose
+
+#printing the mean of the first subset - where the value is yes
+cat("Mean FirstDose amount for December:", mean(isDecember), "\n")
+#printing the mean of the second subset - where the value is no
+cat("Mean FirstDose amount for November:", mean(notDecember), "\n")
+
+#running the two-sample t-test
+t.test(isDecember, notDecember)
+
+```
+
+The p-value is below the generic significance level of 0.05. Hence, we have to reject the null hypothesis. This means that there is a significant difference between the number of people getting there first dose (on any given day in November) as opposed to December.
+
+\newpage
+
+## (8) Tables with summarized information.
+
+```{r echo = FALSE}
+# creating a table of data with the columns:
+# - area name, 
+# - first dose, 
+# - second dose, 
+# - third dose, 
+# - quarter, 
+# - and month_year
+ctTable<-vaccdf1[,c("areaName","FirstDose","SecondDose","ThirdDose")]
+
+# printing summarised information for each group (the means of each dosage per area)
+print(ctTable %>%
+        group_by(areaName) %>%
+        summarise(
+          FirstDose_Means = mean(FirstDose),
+          SecondDose_Means = mean(SecondDose),
+          ThirdDose_Means = mean(ThirdDose)))
+
+# printing summarised information for each group (the sums of each dosage per area)
+print(ctTable %>%
+        group_by(areaName) %>%
+        summarise(
+          FirstDose_Sums = sum(FirstDose),
+          SecondDose_Sums = sum(SecondDose),
+          ThirdDose_Sums = sum(ThirdDose)))
+```
+
+\newpage
+
+## (9) Linear regression model.
+
+Aim - A simple linear model to predict Second Dose numbers on any given day based on First Dose numbers. 
+
+### Variable correllation
+
+```{r echo = FALSE}
+# An earlier visualisation developed - illustrates the relationship between first and second doses in the form of a scatter plot.
+cVarsRelScatter(vaccdf1$FirstDose,
+                vaccdf1$SecondDose,
+                "First Dose", 
+                "Second Dose", 
+                "Number of First Dose vs Second Dose on the same day",
+                "Data from the UK government’s Coronavirus Vaccinations page .")
+```
+
+We can prove that this is the case by calculating the Pearson's correlation coefficient.
+
+```{r echo = FALSE}
+#correlation testing the two variables using the Pearson's method
+cor.test(vaccdf1$FirstDose, vaccdf1$SecondDose, method = "pearson")
+```
+the p value is an extremely small value (less than 0.001). 
+We can conclude from the results that the true correlation is not equal to 0. 
+We can also understand that a strong positive correlation exists between the two variables as the coefficient has a value of 0.83.
+
+### Building the model
+
+```{r echo = FALSE}
+#building the simple linear regression model and printing the model's coefficients
+lmModel = lm(SecondDose~FirstDose, data=vaccdf1)
+print(lmModel)
+```
+Converting the output to a formula format we get the following:
+
+SecondDose = 1634.6653 + 0.7917*FirstDose.
+
+We can also visualise the model as follows: 
+```{r}
+#A base r scatter plot showing the model fitted to the data set.
+plot(x=vaccdf1$FirstDose, y=vaccdf1$SecondDose, main="Linear Regression Model", 
+     xlim =c(0,6000), ylim =c(0, 20000), 
+     abline(lmModel), 
+     xlab ="First Dose", ylab="Second Dose", 
+     cex= 0.75,
+     cex.axis = 0.75,
+     cex.lab = 0.75,
+     cex.main = 0.75,
+     col="blue", pch=16)
+```
+
+### Model interpretation and goodness of fit
+
+```{r}
+#outputting a summary of the model so that it can be interpreted.
+summary(lmModel)
+```
+
+- The intercept has a very low p-value (below 0.05)
+- The p-value for FirstDose is very small (compared to 0.05). Hence, this variable can be used to predict the dependent variable (SecondDose).
+- Looking at the R squared value, it is above 0.6, so this model is a good fit for predicting the dependent value.
+- The models intercept is 1634.67
+- For every one unit increase of the FirstDose we should see 0.79 times that amount for the second dose. 
+
+### Checking the model's adequacy:
+```{r}
+# calculating the errors residuals for the model 
+resid = rstandard(lmModel)
+# plotting the error residuals and the fitted line at 0 so that the residuals can be checked.
+plot (x=lmModel$fitted.values, y=resid, abline(h=0), 
+      xlab="Fitted values", ylab="Residuals", 
+      main="Error Residuals")
+
+#visualising the standard errors via a histogram to check for normality of errors
+hist(resid, breaks = 10, xlab="Residuals", ylab="Frequency", main="Histogram of Residuals")
+```
+
+- Assumption 1: The values are centred around 0.
+- Assumption 2: The values are independent as the points are random and not have a particular pattern.
+- Assumption 3: There is also no indication of an increasing or decreasing pattern.
+- Assumption 4: It is not clear whether the histogram is normally distributed and around the value of 0.
+
+### Confirming the normality of the distribution:
+
+A Jarque test will be used to check if the residuals are normally distributed.
+
+- The null hypothesis of this test is that the residuals are normally distributed
+- The null hypothesis of this test is that the residuals are not normally distributed
+
+```{r}
+#checking for the normal distribution of errors using the Jarque test
+jarque.test(resid)
+```
+
+The p value is lower than our significance level of 0.05 hence the null hypothesis is to be rejected. Meaning that the errors are not normally distributed. 
+
+In conclusion, the model is not an adequate one and cannot be used for predictions. 
+
+\newpage
+
+## Final Conclusions
+
+The key findings from this project are as follows:
+
+- vaccines on weekdays are preferred  to weekends.
+- An increase in vaccine numbers can be seen before Winter.
+- The Christmas break does not seem to lower the number of vaccines.
+- Vaccine numbers vary significantly between the different areas of the UK.
